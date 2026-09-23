@@ -90,7 +90,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // Static Assets / Special Endpoints
   if (path === "/favicon.ico" || path === "/favicon.svg") {
-    const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="burnlink-grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#burnlink-grad)"/><rect x="9" y="14" width="14" height="11" rx="2.5" fill="#ffffff"/><path d="M12 14v-3.5a4 4 0 0 1 8 0V14" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/><circle cx="16" cy="19.5" r="1.5" fill="#1d4ed8"/></svg>`;
+    const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="burnlink-grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#burnlink-grad)"/><rect x="9" y="14" width="14" height="11" rx="2.5" fill="#ffffff"/><path d="M12 14v-3.5a4 4 0 0 1 8 0V14" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/><circle cx="16" cy="19.5" r="1.5" fill="#1d4ed8"/></svg>`;
     return new Response(faviconSvg, {
       headers: {
         "Content-Type": "image/svg+xml",
