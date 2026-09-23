@@ -1,8 +1,8 @@
 // main.ts - Single-Use URL Shortener with Bot & Scanner Protection
 const kv = await Deno.openKv();
 
-const ADMIN_USER = Deno.env.get("ADMIN_USER") || "admin";
-const ADMIN_PASS = Deno.env.get("ADMIN_PASS") || "^FDL66&?i>nbn1j0";
+const ADMIN_USER = Deno.env.get("ADMIN_USER");
+const ADMIN_PASS = Deno.env.get("ADMIN_PASS");
 
 interface LinkRecord {
   id: string;
