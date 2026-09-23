@@ -89,8 +89,8 @@ export async function handleRequest(req: Request): Promise<Response> {
   const path = url.pathname;
 
   // Static Assets / Special Endpoints
-  if (path === "/favicon.ico") {
-    const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>`;
+  if (path === "/favicon.ico" || path === "/favicon.svg") {
+    const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="burnlink-grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#burnlink-grad)"/><rect x="9" y="14" width="14" height="11" rx="2.5" fill="#ffffff"/><path d="M12 14v-3.5a4 4 0 0 1 8 0V14" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/><circle cx="16" cy="19.5" r="1.5" fill="#1d4ed8"/></svg>`;
     return new Response(faviconSvg, {
       headers: {
         "Content-Type": "image/svg+xml",
@@ -304,6 +304,7 @@ export function renderInterstitialHTML(id: string, targetUrl?: string): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BurnLink - Secure Single-Use Gateway</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 
   <!-- Inter Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -553,6 +554,7 @@ export function renderNotice(title: string, message: string, status: number): Re
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${safeTitle} - BurnLink</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 
   <!-- Inter Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -640,6 +642,7 @@ export function renderAdminHTML(): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BurnLink - Admin Console</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 
   <!-- Inter Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">

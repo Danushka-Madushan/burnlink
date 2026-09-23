@@ -2,6 +2,7 @@
 
 [![Deno](https://img.shields.io/badge/Deno-v2.x-black?logo=deno)](https://deno.land)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Zero Dependencies](https://img.shields.io/badge/Dependencies-0-success.svg)](https://deno.land)
 
 A rock-solid, zero-dependency, single-use URL shortener built for **Deno** and **Deno Deploy** powered by **Deno KV**.
 
@@ -9,28 +10,31 @@ BurnLink allows you to share destination URLs via unique short links that are st
 
 It includes **built-in protection against automated link unfurlers** (such as Discord, Slack, iMessage, and email security crawlers) by requiring an explicit human click on an interstitial landing page before the redirect occurs. Concurrent clicks are resolved atomically to guarantee single-use.
 
-
+---
 
 ## ⚡ Features
 
-- **Single-Use Guarantee:** Atomic check-and-set transactions (`kv.atomic()`) prevent race conditions.
-- **Bot & Scanner Immunity:** Interstitial confirmation page prevents automated preview/prefetch crawlers from burning links.
+- **Single-Use Guarantee:** Atomic check-and-set transactions (`kv.atomic()`) prevent race conditions and guarantee links burn exactly once.
+- **Bot & Scanner Immunity:** Interstitial confirmation page prevents automated preview/prefetch crawlers from prematurely burning links.
 - **Modern White Theme UI:** Clean, authentic enterprise interface (inspired by Linear & Stripe) replacing suspicious ad-shortener aesthetics.
-- **Verified Host Preview:** The unlock screen displays the verified destination domain so recipients trust the link before proceeding.
-- **Admin Dashboard:** Built-in dashboard to create, list, copy, search, and delete links.
-- **Audit Logs:** Track when links are accessed and inspect the visitor's User-Agent string and IP.
-- **Zero External Dependencies:** Built entirely with native Web & Deno standard APIs.
+- **Verified Host Preview:** The gateway screen displays the verified destination domain so recipients trust the link before proceeding.
+- **React-Hot-Toast Styled Notifications:** Professional toast feedback with spring pop-in animations, dynamic state badges, and clean dismiss transitions.
+- **Live Search & Status Filtering:** Instant client-side search by Link ID or destination URL, with status tabs (`All`, `Active`, `Burned`) and an animated toolbar refresh button.
+- **Inter Typography & SVG Branding:** Crisp typography via Google Fonts Inter and a custom high-contrast vector favicon (`favicon.svg`).
+- **Admin Console:** Built-in dashboard to create, list, copy, search, and delete links with confirmation modals.
+- **Access Audit Logs:** Track when links are burned, recording timestamps, visitor User-Agent strings, and IP addresses.
+- **Zero External Dependencies:** Built 100% with native Web & Deno standard runtime APIs.
 - **Security Hardened:** XSS-immune DOM rendering, protocol validation (`http:` / `https:`), and HTTP Basic Authentication.
-- **Full TypeScript Support:** Native autocomplete and typings configured via `deno.json`.
+- **Full TypeScript Autocomplete:** Native autocomplete and typings configured directly via `deno.json`.
 
-
+---
 
 ## 📐 Architecture & Logic
 
 BurnLink uses an interstitial click-to-burn pattern rather than trying to maintain fragile User-Agent blocklists:
 
 ```
-[Link Shared] ──> GET /:id ──> Interstitial "Unlock" Screen (Link stays active)
+[Link Shared] ──> GET /:id ──> Interstitial Gateway Screen (Link stays active)
                                   │
                                   ▼ Human clicks button
                               POST /:id ──> Atomic KV Claim
@@ -42,13 +46,13 @@ BurnLink uses an interstitial click-to-burn pattern rather than trying to mainta
 2. **POST `/:id`:** The recipient clicks "Proceed to Destination".
 3. **Atomic Burn:** The server executes `kv.atomic().check().set().commit()`. If valid, the link is marked as used with a timestamp and user-agent, then redirected via `303 See Other`. Any concurrent request fails the atomic check and receives a `410 Gone`.
 
-
+---
 
 ## 🚀 Quick Start (Local Development)
 
 ### 1. Prerequisites
 - [Deno](https://deno.land/#installation) (v1.40+ or v2.x)
-- VS Code with the official [Deno extension](https://marketplace.visualstudio.com/items?itemName=denoland.vscode-deno) *(recommended)*
+- Any modern code editor (VS Code, Cursor, Zed, Neovim)
 
 ### 2. Clone & Setup
 ```bash
@@ -63,7 +67,7 @@ cp .env.example .env
 ```
 
 | Variable | Description | Default |
-| : | : | : |
+| :--- | :--- | :--- |
 | `ADMIN_USER` | Username for `/admin` and API | `admin` |
 | `ADMIN_PASS` | Password for `/admin` and API | `secret123` *(change this in production!)* |
 | `PORT` | Local HTTP server port | `8000` |
@@ -75,17 +79,16 @@ deno task dev
 ```
 Visit `http://localhost:8000/admin` in your browser.
 
+---
 
+## 💻 Editor Setup & Zero-Config Typings
 
-## 💻 Editor & Typings (VS Code)
+This repository is 100% self-contained and **does not require a `.vscode/` directory or custom workspace configs**. All settings and unstable KV permissions (`"unstable": ["kv"]`) are defined directly in the root `deno.json`:
 
-This repository includes a root `deno.json` configuration file with `"unstable": ["kv"]`.
+- **VS Code / Cursor:** Install the official [Deno extension](https://marketplace.visualstudio.com/items?itemName=denoland.vscode-deno). It automatically detects `deno.json` at the project root and activates the Deno Language Server (LSP) for seamless autocomplete, type definitions, and in-editor linting.
+- **Zed / Neovim / Helix:** Point your editor's built-in LSP to `deno lsp` for native completion and diagnostics.
 
-When you open this project in VS Code:
-1. Install the official **Deno** extension (`denoland.vscode-deno`).
-2. VS Code will automatically detect `deno.json` and activate the Deno Language Server, providing complete autocomplete, navigation, and type checking for all `Deno.*` and Deno KV APIs without any manual setup.
-
-
+---
 
 ## 🛠 Available Tasks
 
@@ -101,7 +104,7 @@ deno task fmt        # Format code
 deno task fmt:check  # Check formatting without modifying files
 ```
 
-
+---
 
 ## ☁️ Deployment on Deno Deploy
 
@@ -116,12 +119,15 @@ BurnLink is designed for 1-click zero-config deployment on [Deno Deploy](https:/
    - `ADMIN_PASS`: A strong admin password.
 5. Click **Save** - each push to `main` will automatically deploy!
 
+> [!NOTE]
+> **Deno KV Isolation:** Deno Deploy isolates KV databases per project. When creating links in a Git deployment project, those links are saved to that project's provisioned KV store, which is separate from any standalone Playground project.
+
 ### Option B: Deno Deploy Playground
 1. Create a playground project at [dash.deno.com](https://dash.deno.com).
 2. Copy and paste the contents of `main.ts`.
 3. Set `ADMIN_USER` and `ADMIN_PASS` in project settings.
 
-
+---
 
 ## 📡 API Reference
 
@@ -160,7 +166,7 @@ GET /api/links
 DELETE /api/links/:id
 ```
 
-
+---
 
 ## 📄 License
 

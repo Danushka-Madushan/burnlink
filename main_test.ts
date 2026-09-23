@@ -112,11 +112,16 @@ Deno.test("renderNotice returns proper Response status and content", async () =>
   assertEquals(body.includes("Test Message"), true);
 });
 
-Deno.test("handleRequest serves favicon.ico and robots.txt", async () => {
-  const faviconReq = new Request("http://localhost/favicon.ico");
-  const faviconRes = await handleRequest(faviconReq);
-  assertEquals(faviconRes.status, 200);
-  assertEquals(faviconRes.headers.get("Content-Type"), "image/svg+xml");
+Deno.test("handleRequest serves favicon.ico, favicon.svg, and robots.txt", async () => {
+  const icoReq = new Request("http://localhost/favicon.ico");
+  const icoRes = await handleRequest(icoReq);
+  assertEquals(icoRes.status, 200);
+  assertEquals(icoRes.headers.get("Content-Type"), "image/svg+xml");
+
+  const svgReq = new Request("http://localhost/favicon.svg");
+  const svgRes = await handleRequest(svgReq);
+  assertEquals(svgRes.status, 200);
+  assertEquals(svgRes.headers.get("Content-Type"), "image/svg+xml");
 
   const robotsReq = new Request("http://localhost/robots.txt");
   const robotsRes = await handleRequest(robotsReq);
