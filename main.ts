@@ -1610,11 +1610,7 @@ export function renderAdminHTML(): string {
 
           document.getElementById('calloutCopyBtn').onclick = () => {
             navigator.clipboard.writeText(fullUrl);
-            document.getElementById('calloutCopyText').textContent = 'Copied!';
             showToast('Link copied to clipboard!');
-            setTimeout(() => {
-              document.getElementById('calloutCopyText').textContent = 'Copy';
-            }, 1500);
           };
 
           await loadLinks();
