@@ -114,7 +114,7 @@ BurnLink is designed for 1-click zero-config deployment on [Deno Deploy](https:/
 4. Under **Settings > Environment Variables**, add:
    - `ADMIN_USER`: Your admin username.
    - `ADMIN_PASS`: A strong admin password.
-5. Click **Save** — each push to `main` will automatically deploy!
+5. Click **Save** - each push to `main` will automatically deploy!
 
 ### Option B: Deno Deploy Playground
 1. Create a playground project at [dash.deno.com](https://dash.deno.com).

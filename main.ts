@@ -303,10 +303,10 @@ export function renderInterstitialHTML(id: string, targetUrl?: string): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BurnLink — Secure Single-Use Gateway</title>
+  <title>BurnLink - Secure Single-Use Gateway</title>
 
   <!-- OpenGraph tags for Discord, Slack, iMessage, and social crawlers -->
-  <meta property="og:title" content="BurnLink — Single-Use Confidential Link" />
+  <meta property="og:title" content="BurnLink - Single-Use Confidential Link" />
   <meta property="og:description" content="This is an ephemeral link set to self-destruct after one view. Click to proceed securely." />
   <meta property="og:type" content="website" />
 
@@ -488,7 +488,7 @@ export function renderInterstitialHTML(id: string, targetUrl?: string): string {
     <ul class="info-list">
       <li class="info-item">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-        <span>One-time access only — burns permanently upon proceed</span>
+        <span>One-time access only - burns permanently upon proceed</span>
       </li>
       <li class="info-item">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
@@ -534,7 +534,7 @@ export function renderNotice(title: string, message: string, status: number): Re
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${safeTitle} — BurnLink</title>
+  <title>${safeTitle} - BurnLink</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -615,7 +615,7 @@ export function renderAdminHTML(): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BurnLink — Admin Console</title>
+  <title>BurnLink - Admin Console</title>
   <style>
     :root {
       --bg: #f8fafc;
@@ -858,8 +858,15 @@ export function renderAdminHTML(): string {
       max-width: 300px;
       width: 100%;
     }
+    .search-box .input-icon {
+      left: 0.75rem;
+    }
+    .search-box .input-icon svg {
+      width: 15px;
+      height: 15px;
+    }
     .search-box input {
-      padding: 0.5rem 0.75rem;
+      padding: 0.55rem 0.75rem 0.55rem 2.25rem;
       font-size: 0.85rem;
     }
     .filter-tabs {
@@ -1097,15 +1104,15 @@ export function renderAdminHTML(): string {
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-label">Total Links</div>
-        <div class="stat-value" id="statTotal">—</div>
+        <div class="stat-value" id="statTotal">-</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Active (Unused)</div>
-        <div class="stat-value" style="color: #059669;" id="statActive">—</div>
+        <div class="stat-value" style="color: #059669;" id="statActive">-</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Burned Links</div>
-        <div class="stat-value" style="color: #64748b;" id="statBurned">—</div>
+        <div class="stat-value" style="color: #64748b;" id="statBurned">-</div>
       </div>
     </div>
 
@@ -1316,7 +1323,7 @@ export function renderAdminHTML(): string {
           }
         } else {
           tdAccessed.style.color = '#94a3b8';
-          tdAccessed.textContent = '—';
+          tdAccessed.textContent = '-';
         }
         tr.appendChild(tdAccessed);
 
