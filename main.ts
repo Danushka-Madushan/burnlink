@@ -506,7 +506,7 @@ export function renderInterstitialHTML(id: string, targetUrl?: string): string {
     <ul class="info-list">
       <li class="info-item">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-        <span>One-time access only - burns permanently upon proceed</span>
+        <span>One-time access only - burns upon proceed</span>
       </li>
       <li class="info-item">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
@@ -1171,32 +1171,96 @@ export function renderAdminHTML(): string {
     }
     .btn-modal-danger:hover { background: #b91c1c; }
 
-    /* Toast */
+    /* React-Hot-Toast Style Notifications */
     #toastContainer {
       position: fixed;
-      bottom: 1.5rem;
-      right: 1.5rem;
+      bottom: 1.25rem;
+      right: 1.25rem;
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
-      z-index: 100;
+      gap: 0.65rem;
+      z-index: 9999;
+      pointer-events: none;
     }
-    .toast {
-      background: #0f172a;
-      color: #ffffff;
-      padding: 0.75rem 1rem;
+    .rht-toast {
+      pointer-events: auto;
+      background: #ffffff;
+      color: #363636;
+      padding: 9px 12px;
       border-radius: 8px;
-      font-size: 0.85rem;
+      font-size: 0.875rem;
       font-weight: 500;
-      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+      line-height: 1.4;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1), 0 3px 3px rgba(0, 0, 0, 0.05);
+      border: 1px solid rgba(0, 0, 0, 0.04);
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      animation: slideIn 0.2s ease-out;
+      gap: 0.65rem;
+      max-width: 380px;
+      animation: rht-enter 0.35s cubic-bezier(0.21, 1.02, 0.73, 1) forwards;
     }
-    @keyframes slideIn {
-      from { transform: translateY(10px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
+    .rht-toast.rht-leave {
+      animation: rht-leave 0.3s cubic-bezier(0.06, 0.71, 0.55, 1) forwards;
+    }
+    .rht-icon {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-width: 20px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      animation: rht-scale 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    .rht-icon svg {
+      width: 12px;
+      height: 12px;
+      color: #ffffff;
+    }
+    .rht-success {
+      background: #61d345;
+    }
+    .rht-error {
+      background: #ff4b4b;
+    }
+    .rht-message {
+      flex: 1;
+      word-break: break-word;
+    }
+    @keyframes rht-enter {
+      0% {
+        transform: translate3d(0, 20px, 0) scale(0.9);
+        opacity: 0;
+      }
+      100% {
+        transform: translate3d(0, 0, 0) scale(1);
+        opacity: 1;
+      }
+    }
+    @keyframes rht-leave {
+      0% {
+        transform: translate3d(0, 0, 0) scale(1);
+        opacity: 1;
+      }
+      100% {
+        transform: translate3d(0, 16px, 0) scale(0.85);
+        opacity: 0;
+      }
+    }
+    @keyframes rht-scale {
+      0% {
+        transform: scale(0);
+        opacity: 0;
+      }
+      50% {
+        transform: scale(1.25);
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
     }
   </style>
 </head>
@@ -1353,15 +1417,30 @@ export function renderAdminHTML(): string {
     const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
 
     function showToast(message, isError = false) {
+      const container = document.getElementById('toastContainer');
       const toast = document.createElement('div');
-      toast.className = 'toast';
-      toast.style.borderLeft = isError ? '4px solid #ef4444' : '4px solid #10b981';
-      toast.textContent = message;
-      document.getElementById('toastContainer').appendChild(toast);
+      toast.className = 'rht-toast';
+
+      const icon = document.createElement('div');
+      icon.className = 'rht-icon ' + (isError ? 'rht-error' : 'rht-success');
+
+      if (isError) {
+        icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+      } else {
+        icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      }
+
+      const msg = document.createElement('div');
+      msg.className = 'rht-message';
+      msg.textContent = message;
+
+      toast.appendChild(icon);
+      toast.appendChild(msg);
+      container.appendChild(toast);
+
       setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transition = 'opacity 0.3s ease';
-        setTimeout(() => toast.remove(), 300);
+        toast.classList.add('rht-leave');
+        setTimeout(() => toast.remove(), 280);
       }, 3000);
     }
 
@@ -1408,8 +1487,6 @@ export function renderAdminHTML(): string {
         copyBtn.onclick = () => {
           navigator.clipboard.writeText(fullShortUrl);
           showToast('Copied ' + fullShortUrl + ' to clipboard!');
-          copyBtn.querySelector('span').textContent = 'Copied';
-          setTimeout(() => { copyBtn.querySelector('span').textContent = 'Copy'; }, 1500);
         };
 
         shortDiv.appendChild(code);
