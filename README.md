@@ -15,11 +15,13 @@ It includes **built-in protection against automated link unfurlers** (such as Di
 
 - **Single-Use Guarantee:** Atomic check-and-set transactions (`kv.atomic()`) prevent race conditions.
 - **Bot & Scanner Immunity:** Interstitial confirmation page prevents automated preview/prefetch crawlers from burning links.
-- **Admin Dashboard:** Built-in dashboard to create, list, copy, and delete links.
-- **Audit Logs:** Track when links are accessed and inspect the visitor's User-Agent string.
-- **Zero External Dependencies:** Built using native Web & Deno standard APIs.
-- **Security Hardened:** XSS-safe DOM rendering, input scheme validation (`http:` / `https:`), and authentication guard.
-- **Full TypeScript & VS Code Support:** Instant typings and autocomplete out of the box.
+- **Modern White Theme UI:** Clean, authentic enterprise interface (inspired by Linear & Stripe) replacing suspicious ad-shortener aesthetics.
+- **Verified Host Preview:** The unlock screen displays the verified destination domain so recipients trust the link before proceeding.
+- **Admin Dashboard:** Built-in dashboard to create, list, copy, search, and delete links.
+- **Audit Logs:** Track when links are accessed and inspect the visitor's User-Agent string and IP.
+- **Zero External Dependencies:** Built entirely with native Web & Deno standard APIs.
+- **Security Hardened:** XSS-immune DOM rendering, protocol validation (`http:` / `https:`), and HTTP Basic Authentication.
+- **Full TypeScript Support:** Native autocomplete and typings configured via `deno.json`.
 
 ---
 
@@ -36,9 +38,9 @@ BurnLink uses an interstitial click-to-burn pattern rather than trying to mainta
                                             └── Subsequent visitors: "Link Expired" (410)
 ```
 
-1. **GET `/:id`:** Automated bots (unfurlers/scanners) and human recipients receive an HTML landing page with OpenGraph tags and an "Unlock & Proceed" button. **The link is not burned.**
-2. **POST `/:id`:** The recipient clicks "Unlock & Proceed".
-3. **Atomic Burn:** The server executes `kv.atomic().check().set().commit()`. If valid, the link is marked as used with a timestamp and user-agent, then redirected. Any concurrent request fails the atomic check.
+1. **GET `/:id`:** Automated bots (unfurlers/scanners) and human recipients receive an HTML landing page with OpenGraph tags, verified host preview, and an "Unlock & Proceed" button. **The link is not burned.**
+2. **POST `/:id`:** The recipient clicks "Proceed to Destination".
+3. **Atomic Burn:** The server executes `kv.atomic().check().set().commit()`. If valid, the link is marked as used with a timestamp and user-agent, then redirected via `303 See Other`. Any concurrent request fails the atomic check and receives a `410 Gone`.
 
 ---
 
@@ -63,7 +65,7 @@ cp .env.example .env
 | Variable | Description | Default |
 | :--- | :--- | :--- |
 | `ADMIN_USER` | Username for `/admin` and API | `admin` |
-| `ADMIN_PASS` | Password for `/admin` and API | `secret123` *(change this!)* |
+| `ADMIN_PASS` | Password for `/admin` and API | `secret123` *(change this in production!)* |
 | `PORT` | Local HTTP server port | `8000` |
 
 ### 4. Run Development Server
@@ -77,11 +79,11 @@ Visit `http://localhost:8000/admin` in your browser.
 
 ## 💻 Editor & Typings (VS Code)
 
-This repository includes pre-configured `.vscode/settings.json` and `.vscode/extensions.json`.
+This repository includes a root `deno.json` configuration file with `"unstable": ["kv"]`.
 
-When you open this folder in VS Code:
-1. Accept the prompt to install the **Deno** extension (`denoland.vscode-deno`).
-2. VS Code will immediately activate the Deno Language Server with full autocomplete and type checking for all `Deno.*` and Deno KV APIs.
+When you open this project in VS Code:
+1. Install the official **Deno** extension (`denoland.vscode-deno`).
+2. VS Code will automatically detect `deno.json` and activate the Deno Language Server, providing complete autocomplete, navigation, and type checking for all `Deno.*` and Deno KV APIs without any manual setup.
 
 ---
 
