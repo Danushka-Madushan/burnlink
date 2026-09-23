@@ -1,10 +1,6 @@
 // main.ts - Single-Use URL Shortener with Bot & Scanner Protection
-const kv = await Deno.openKv();
 
-const ADMIN_USER = Deno.env.get("ADMIN_USER");
-const ADMIN_PASS = Deno.env.get("ADMIN_PASS");
-
-interface LinkRecord {
+export interface LinkRecord {
   id: string;
   targetUrl: string;
   createdAt: string;
@@ -13,32 +9,76 @@ interface LinkRecord {
   userAgent?: string | null;
 }
 
+export interface CreateLinkPayload {
+  targetUrl: string;
+}
+
+export interface ApiResponse<T = unknown> {
+  success?: boolean;
+  error?: string;
+  record?: T;
+}
+
+// Open Deno KV connection
+export const kv = await Deno.openKv();
+
+export const ADMIN_USER = Deno.env.get("ADMIN_USER") ?? "admin";
+export const ADMIN_PASS = Deno.env.get("ADMIN_PASS") ?? "secret123";
+
+if (!Deno.env.get("ADMIN_USER") || !Deno.env.get("ADMIN_PASS")) {
+  console.warn(
+    "⚠️  [BurnLink Security Warning] ADMIN_USER and/or ADMIN_PASS are not set. Using default credentials ('admin' / 'secret123'). Set these in your environment variables for production security!",
+  );
+}
+
 // Basic Auth verification
-function isAuthenticated(req: Request): boolean {
+export function isAuthenticated(
+  req: Request,
+  adminUser = ADMIN_USER,
+  adminPass = ADMIN_PASS,
+): boolean {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Basic ")) return false;
   try {
     const [user, pass] = atob(authHeader.split(" ")[1]).split(":");
-    return user === ADMIN_USER && pass === ADMIN_PASS;
+    return user === adminUser && pass === adminPass;
   } catch {
     return false;
   }
 }
 
-function unauthorized(): Response {
+export function unauthorized(): Response {
   return new Response("Unauthorized", {
     status: 401,
     headers: { "WWW-Authenticate": 'Basic realm="Admin Panel"' },
   });
 }
 
-function generateId(length = 7): string {
+export function generateId(length = 7): string {
   const chars = "23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
   const bytes = crypto.getRandomValues(new Uint8Array(length));
   return Array.from(bytes, (b) => chars[b % chars.length]).join("");
 }
 
-Deno.serve(async (req: Request) => {
+export function isValidUrl(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+export async function handleRequest(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
@@ -52,10 +92,13 @@ Deno.serve(async (req: Request) => {
     }
 
     if (entry.value.used) {
+      const accessTime = entry.value.usedAt
+        ? new Date(entry.value.usedAt).toLocaleString()
+        : "an unknown time";
       return renderNotice(
         "Link Expired",
-        `This link was configured for single-use and was already accessed on ${new Date(entry.value.usedAt!).toLocaleString()}.`,
-        410
+        `This link was configured for single-use and was already accessed on ${accessTime}.`,
+        410,
       );
     }
 
@@ -95,7 +138,7 @@ Deno.serve(async (req: Request) => {
         return renderNotice(
           "Link Expired",
           "This link was just consumed by another request.",
-          410
+          410,
         );
       }
 
@@ -122,8 +165,15 @@ Deno.serve(async (req: Request) => {
   // API: Create Link
   if (req.method === "POST" && path === "/api/links") {
     try {
-      const { targetUrl } = await req.json();
-      new URL(targetUrl);
+      const body = await req.json() as Partial<CreateLinkPayload>;
+      const targetUrl = body?.targetUrl?.trim();
+
+      if (!targetUrl || !isValidUrl(targetUrl)) {
+        return Response.json(
+          { error: "Invalid URL provided. Only http:// and https:// URLs are allowed." },
+          { status: 400 },
+        );
+      }
 
       const id = generateId();
       const record: LinkRecord = {
@@ -135,9 +185,9 @@ Deno.serve(async (req: Request) => {
       };
 
       await kv.set(["links", id], record);
-      return Response.json({ success: true, record });
+      return Response.json({ success: true, record }, { status: 201 });
     } catch {
-      return Response.json({ error: "Invalid URL provided." }, { status: 400 });
+      return Response.json({ error: "Invalid JSON request body." }, { status: 400 });
     }
   }
 
@@ -167,10 +217,14 @@ Deno.serve(async (req: Request) => {
   }
 
   return new Response("Not Found", { status: 404 });
-});
+}
+
+// Start server
+Deno.serve(handleRequest);
 
 // HTML Components
-function renderInterstitialHTML(id: string): string {
+export function renderInterstitialHTML(id: string): string {
+  const safeId = encodeURIComponent(id);
   return `<!DOCTYPE html>
   <html lang="en">
   <head>
@@ -226,7 +280,7 @@ function renderInterstitialHTML(id: string): string {
       <div class="icon">🔒</div>
       <h1>Single-Use Link</h1>
       <p>This destination is set to burn after a single view. Once opened, it can never be accessed again.</p>
-      <form method="POST" action="/${id}">
+      <form method="POST" action="/${safeId}">
         <button type="submit">Proceed to Destination →</button>
       </form>
     </div>
@@ -234,13 +288,15 @@ function renderInterstitialHTML(id: string): string {
   </html>`;
 }
 
-function renderNotice(title: string, message: string, status: number): Response {
+export function renderNotice(title: string, message: string, status: number): Response {
+  const safeTitle = escapeHtml(title);
+  const safeMessage = escapeHtml(message);
   const html = `<!DOCTYPE html>
-  <html>
+  <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${title}</title>
+    <title>${safeTitle}</title>
     <style>
       body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #090d16; color: #f8fafc; }
       .card { max-width: 420px; padding: 2.5rem; background: #111827; border-radius: 12px; border: 1px solid #1f2937; text-align: center; }
@@ -250,8 +306,8 @@ function renderNotice(title: string, message: string, status: number): Response 
   </head>
   <body>
     <div class="card">
-      <h1>${title}</h1>
-      <p>${message}</p>
+      <h1>${safeTitle}</h1>
+      <p>${safeMessage}</p>
     </div>
   </body>
   </html>`;
@@ -261,9 +317,9 @@ function renderNotice(title: string, message: string, status: number): Response 
   });
 }
 
-function renderAdminHTML(): string {
+export function renderAdminHTML(): string {
   return `<!DOCTYPE html>
-  <html>
+  <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -280,6 +336,7 @@ function renderAdminHTML(): string {
       input:focus { outline: none; border-color: var(--primary); }
       button { background: var(--primary); color: #fff; border: none; padding: 0.75rem 1.25rem; border-radius: 6px; font-weight: 500; cursor: pointer; }
       button:hover { background: var(--primary-hover); }
+      button:disabled { opacity: 0.6; cursor: not-allowed; }
       table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
       th, td { padding: 0.85rem 1rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
       th { background: #161f30; color: var(--text-muted); font-weight: 600; }
@@ -321,53 +378,125 @@ function renderAdminHTML(): string {
 
     <script>
       async function loadLinks() {
-        const res = await fetch('/api/links');
-        const data = await res.json();
-        const tbody = document.getElementById('tableBody');
-        tbody.innerHTML = '';
-        
-        data.forEach(link => {
-          const fullShort = window.location.origin + '/' + link.id;
-          const tr = document.createElement('tr');
-          tr.innerHTML = \`
-            <td>
-              <code>\${link.id}</code>
-              <button class="copy-btn" onclick="navigator.clipboard.writeText('\${fullShort}')">Copy</button>
-            </td>
-            <td class="url-cell" title="\${link.targetUrl}">
-              <a href="\${link.targetUrl}" target="_blank" style="color: #60a5fa; text-decoration: none;">\${link.targetUrl}</a>
-            </td>
-            <td>
-              <span class="badge \${link.used ? 'badge-used' : 'badge-unused'}">
-                \${link.used ? 'Used' : 'Active'}
-              </span>
-            </td>
-            <td>\${new Date(link.createdAt).toLocaleDateString()}</td>
-            <td>\${link.usedAt ? new Date(link.usedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '—'}</td>
-            <td>
-              <button class="del-btn" onclick="deleteLink('\${link.id}')">Delete</button>
-            </td>
-          \`;
-          tbody.appendChild(tr);
-        });
+        try {
+          const res = await fetch('/api/links');
+          if (!res.ok) {
+            if (res.status === 401) {
+              alert('Session unauthorized or expired. Please reload to log in.');
+            }
+            return;
+          }
+          const data = await res.json();
+          const tbody = document.getElementById('tableBody');
+          tbody.innerHTML = '';
+          
+          data.forEach(link => {
+            const fullShort = window.location.origin + '/' + encodeURIComponent(link.id);
+            const tr = document.createElement('tr');
+
+            // ID / Copy
+            const tdId = document.createElement('td');
+            const code = document.createElement('code');
+            code.textContent = link.id;
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'copy-btn';
+            copyBtn.textContent = 'Copy';
+            copyBtn.onclick = () => {
+              navigator.clipboard.writeText(fullShort);
+              copyBtn.textContent = 'Copied!';
+              setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+            };
+            tdId.appendChild(code);
+            tdId.appendChild(copyBtn);
+            tr.appendChild(tdId);
+
+            // Target URL
+            const tdUrl = document.createElement('td');
+            tdUrl.className = 'url-cell';
+            tdUrl.title = link.targetUrl;
+            const a = document.createElement('a');
+            a.href = link.targetUrl;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.style.color = '#60a5fa';
+            a.style.textDecoration = 'none';
+            a.textContent = link.targetUrl;
+            tdUrl.appendChild(a);
+            tr.appendChild(tdUrl);
+
+            // Status
+            const tdStatus = document.createElement('td');
+            const badge = document.createElement('span');
+            badge.className = 'badge ' + (link.used ? 'badge-used' : 'badge-unused');
+            badge.textContent = link.used ? 'Used' : 'Active';
+            tdStatus.appendChild(badge);
+            tr.appendChild(tdStatus);
+
+            // Created
+            const tdCreated = document.createElement('td');
+            tdCreated.textContent = new Date(link.createdAt).toLocaleDateString();
+            tr.appendChild(tdCreated);
+
+            // Accessed
+            const tdAccessed = document.createElement('td');
+            tdAccessed.textContent = link.usedAt
+              ? new Date(link.usedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : '—';
+            if (link.userAgent) {
+              tdAccessed.title = 'User Agent: ' + link.userAgent;
+            }
+            tr.appendChild(tdAccessed);
+
+            // Actions
+            const tdAction = document.createElement('td');
+            const delBtn = document.createElement('button');
+            delBtn.className = 'del-btn';
+            delBtn.textContent = 'Delete';
+            delBtn.onclick = () => deleteLink(link.id);
+            tdAction.appendChild(delBtn);
+            tr.appendChild(tdAction);
+
+            tbody.appendChild(tr);
+          });
+        } catch (err) {
+          console.error('Failed to load links:', err);
+        }
       }
 
       document.getElementById('linkForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const input = document.getElementById('targetUrl');
-        await fetch('/api/links', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetUrl: input.value })
-        });
-        input.value = '';
-        loadLinks();
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+
+        try {
+          const res = await fetch('/api/links', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetUrl: input.value })
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            alert(data.error || 'Failed to create link');
+          } else {
+            input.value = '';
+            await loadLinks();
+          }
+        } catch (err) {
+          alert('Network error while creating link');
+        } finally {
+          submitBtn.disabled = false;
+        }
       });
 
       async function deleteLink(id) {
         if (confirm('Delete this record?')) {
-          await fetch('/api/links/' + id, { method: 'DELETE' });
-          loadLinks();
+          try {
+            await fetch('/api/links/' + encodeURIComponent(id), { method: 'DELETE' });
+            await loadLinks();
+          } catch (err) {
+            alert('Failed to delete link');
+          }
         }
       }
 

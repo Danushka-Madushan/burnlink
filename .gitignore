@@ -1,0 +1,23 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Deno KV local storage
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+.deno/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# IDE and editor files (excluding committed .vscode configs)
+.idea/
+*.swp
+*.swo
