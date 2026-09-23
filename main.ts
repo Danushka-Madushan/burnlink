@@ -1338,6 +1338,13 @@ export function renderAdminHTML(): string {
     let currentSearch = '';
     let pendingDeleteId = null;
 
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
     const tableBody = document.getElementById('tableBody');
     const emptyState = document.getElementById('emptyState');
     const deleteModal = document.getElementById('deleteModal');
@@ -1484,6 +1491,8 @@ export function renderAdminHTML(): string {
         if (!res.ok) {
           if (res.status === 401) {
             showToast('Session expired. Please refresh to log in.', true);
+          } else {
+            showToast('Failed to load links (HTTP ' + res.status + ').', true);
           }
           return;
         }
@@ -1491,7 +1500,8 @@ export function renderAdminHTML(): string {
         updateStats();
         renderTable();
       } catch (err) {
-        showToast('Failed to load links from server.', true);
+        console.error('Failed to load links:', err);
+        showToast('Failed to load links: ' + (err.message || 'Network error'), true);
       }
     }
 
