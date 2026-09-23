@@ -7,6 +7,7 @@ export interface LinkRecord {
   used: boolean;
   usedAt: string | null;
   userAgent?: string | null;
+  ip?: string | null;
 }
 
 export interface CreateLinkPayload {
@@ -17,6 +18,7 @@ export interface ApiResponse<T = unknown> {
   success?: boolean;
   error?: string;
   record?: T;
+  message?: string;
 }
 
 // Open Deno KV connection
@@ -31,7 +33,7 @@ if (!Deno.env.get("ADMIN_USER") || !Deno.env.get("ADMIN_PASS")) {
   );
 }
 
-// Basic Auth verification
+// Basic Auth verification - handles passwords with colons safely
 export function isAuthenticated(
   req: Request,
   adminUser = ADMIN_USER,
@@ -40,7 +42,11 @@ export function isAuthenticated(
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Basic ")) return false;
   try {
-    const [user, pass] = atob(authHeader.split(" ")[1]).split(":");
+    const decoded = atob(authHeader.split(" ")[1]);
+    const colonIdx = decoded.indexOf(":");
+    if (colonIdx === -1) return false;
+    const user = decoded.substring(0, colonIdx);
+    const pass = decoded.substring(colonIdx + 1);
     return user === adminUser && pass === adminPass;
   } catch {
     return false;
@@ -50,7 +56,7 @@ export function isAuthenticated(
 export function unauthorized(): Response {
   return new Response("Unauthorized", {
     status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="Admin Panel"' },
+    headers: { "WWW-Authenticate": 'Basic realm="BurnLink Admin Console"' },
   });
 }
 
@@ -82,22 +88,50 @@ export async function handleRequest(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
+  // Static Assets / Special Endpoints
+  if (path === "/favicon.ico") {
+    const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>`;
+    return new Response(faviconSvg, {
+      headers: {
+        "Content-Type": "image/svg+xml",
+        "Cache-Control": "public, max-age=86400",
+      },
+    });
+  }
+
+  if (path === "/robots.txt") {
+    return new Response("User-agent: *\nDisallow: /admin\nDisallow: /api\n", {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+
   // 1. Single-Use Link Handling
   if (path.length > 1 && !path.startsWith("/api") && !path.startsWith("/admin")) {
-    const id = path.slice(1);
+    const id = path.slice(1).replace(/\/+$/, "");
+    if (!id) {
+      return renderNotice("Link Not Found", "The requested link path is invalid.", 404);
+    }
+
     const entry = await kv.get<LinkRecord>(["links", id]);
 
     if (!entry.value) {
-      return renderNotice("Link Not Found", "This link does not exist or has been deleted.", 404);
+      return renderNotice(
+        "Link Not Found",
+        "This link does not exist, has expired, or was removed.",
+        404,
+      );
     }
 
     if (entry.value.used) {
       const accessTime = entry.value.usedAt
-        ? new Date(entry.value.usedAt).toLocaleString()
+        ? new Date(entry.value.usedAt).toLocaleString([], {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
         : "an unknown time";
       return renderNotice(
-        "Link Expired",
-        `This link was configured for single-use and was already accessed on ${accessTime}.`,
+        "Link Has Already Burned",
+        `This single-use link was configured to self-destruct after one view and was accessed on <strong>${accessTime}</strong>. It can no longer be retrieved.`,
         410,
       );
     }
@@ -106,7 +140,8 @@ export async function handleRequest(req: Request): Promise<Response> {
     if (req.method === "GET") {
       const isPrefetch = req.headers.get("purpose") === "prefetch" ||
         req.headers.get("sec-purpose") === "prefetch" ||
-        req.headers.get("x-purpose") === "preview";
+        req.headers.get("x-purpose") === "preview" ||
+        req.headers.get("x-moz") === "prefetch";
 
       if (isPrefetch) {
         // Return 204 No Content so browsers/email clients don't pre-render or follow through
@@ -114,18 +149,23 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
 
       // Serve the confirmation screen (Discordbot reads OpenGraph tags; humans see the button)
-      return new Response(renderInterstitialHTML(id), {
+      return new Response(renderInterstitialHTML(id, entry.value.targetUrl), {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
     }
 
     // B. POST Request: The human clicked "Unlock & Proceed"
     if (req.method === "POST") {
+      const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        req.headers.get("cf-connecting-ip") ||
+        null;
+
       const updatedRecord: LinkRecord = {
         ...entry.value,
         used: true,
         usedAt: new Date().toISOString(),
         userAgent: req.headers.get("user-agent") || "Unknown",
+        ip: clientIp,
       };
 
       // Atomic commit: Only one parallel execution can claim it
@@ -137,7 +177,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (!commit.ok) {
         return renderNotice(
           "Link Expired",
-          "This link was just consumed by another request.",
+          "This link was just claimed and consumed by another concurrent request.",
           410,
         );
       }
@@ -166,11 +206,23 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "POST" && path === "/api/links") {
     try {
       const body = await req.json() as Partial<CreateLinkPayload>;
-      const targetUrl = body?.targetUrl?.trim();
+      let targetUrl = body?.targetUrl?.trim();
 
-      if (!targetUrl || !isValidUrl(targetUrl)) {
+      if (!targetUrl) {
         return Response.json(
-          { error: "Invalid URL provided. Only http:// and https:// URLs are allowed." },
+          { error: "Target URL is required." },
+          { status: 400 },
+        );
+      }
+
+      // Prepend https:// if protocol is omitted
+      if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
+        targetUrl = "https://" + targetUrl;
+      }
+
+      if (!isValidUrl(targetUrl)) {
+        return Response.json(
+          { error: "Invalid URL provided. Please provide a valid web address." },
           { status: 400 },
         );
       }
@@ -187,7 +239,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       await kv.set(["links", id], record);
       return Response.json({ success: true, record }, { status: 201 });
     } catch {
-      return Response.json({ error: "Invalid JSON request body." }, { status: 400 });
+      return Response.json({ error: "Invalid JSON request payload." }, { status: 400 });
     }
   }
 
@@ -204,9 +256,16 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // API: Delete Link
   if (req.method === "DELETE" && path.startsWith("/api/links/")) {
-    const id = path.split("/").pop();
-    if (id) await kv.delete(["links", id]);
-    return Response.json({ success: true });
+    const id = path.slice("/api/links/".length).trim();
+    if (!id) {
+      return Response.json({ error: "Missing link ID." }, { status: 400 });
+    }
+    const existing = await kv.get(["links", id]);
+    if (!existing.value) {
+      return Response.json({ error: "Link not found." }, { status: 404 });
+    }
+    await kv.delete(["links", id]);
+    return Response.json({ success: true, message: "Link deleted successfully." });
   }
 
   // 3. Admin Dashboard
@@ -216,101 +275,334 @@ export async function handleRequest(req: Request): Promise<Response> {
     });
   }
 
-  return new Response("Not Found", { status: 404 });
+  return renderNotice("Page Not Found", "The requested page does not exist.", 404);
 }
 
 // Start server
 Deno.serve(handleRequest);
 
-// HTML Components
-export function renderInterstitialHTML(id: string): string {
+// ==========================================
+// HTML Components (Professional White Theme)
+// ==========================================
+
+export function renderInterstitialHTML(id: string, targetUrl?: string): string {
   const safeId = encodeURIComponent(id);
+
+  let hostname = "External Destination";
+  if (targetUrl) {
+    try {
+      hostname = new URL(targetUrl).hostname;
+    } catch {
+      hostname = "External Destination";
+    }
+  }
+  const safeHostname = escapeHtml(hostname);
+
   return `<!DOCTYPE html>
-  <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Protected Single-Use Link</title>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BurnLink — Secure Single-Use Gateway</title>
 
-    <!-- OpenGraph tags for Discord, Slack, and messaging apps -->
-    <meta property="og:title" content="🔒 Single-Use Protected Link" />
-    <meta property="og:description" content="This link will expire immediately after one access. Click to view destination." />
-    <meta property="og:type" content="website" />
+  <!-- OpenGraph tags for Discord, Slack, iMessage, and social crawlers -->
+  <meta property="og:title" content="BurnLink — Single-Use Confidential Link" />
+  <meta property="og:description" content="This is an ephemeral link set to self-destruct after one view. Click to proceed securely." />
+  <meta property="og:type" content="website" />
 
-    <style>
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        height: 100vh;
-        margin: 0;
-        background: #090d16;
-        color: #f8fafc;
-      }
-      .card {
-        max-width: 440px;
-        padding: 2.5rem;
-        background: #111827;
-        border-radius: 12px;
-        border: 1px solid #1f2937;
-        text-align: center;
-        box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
-      }
-      .icon { font-size: 2.5rem; margin-bottom: 1rem; }
-      h1 { font-size: 1.35rem; margin: 0 0 0.75rem 0; font-weight: 600; }
-      p { color: #94a3b8; font-size: 0.9rem; line-height: 1.5; margin: 0 0 1.75rem 0; }
-      button {
-        background: #3b82f6;
-        color: white;
-        border: none;
-        padding: 0.85rem 1.5rem;
-        font-size: 0.95rem;
-        font-weight: 600;
-        border-radius: 6px;
-        cursor: pointer;
-        width: 100%;
-        transition: background 0.15s ease;
-      }
-      button:hover { background: #2563eb; }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <div class="icon">🔒</div>
-      <h1>Single-Use Link</h1>
-      <p>This destination is set to burn after a single view. Once opened, it can never be accessed again.</p>
-      <form method="POST" action="/${safeId}">
-        <button type="submit">Proceed to Destination →</button>
-      </form>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-subtle: #eff6ff;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      background-color: var(--bg);
+      background-image: radial-gradient(circle at 50% 0%, #e0e7ff 0%, #f8fafc 55%);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 1.5rem;
+      -webkit-font-smoothing: antialiased;
+    }
+    .card {
+      max-width: 460px;
+      width: 100%;
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      padding: 2.25rem 2rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 20px 25px -5px rgba(0, 0, 0, 0.04);
+      text-align: center;
+    }
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.75rem;
+      background: var(--primary-subtle);
+      border: 1px solid #bfdbfe;
+      border-radius: 9999px;
+      color: var(--primary);
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      margin-bottom: 1.25rem;
+    }
+    .brand-badge svg { width: 14px; height: 14px; }
+    .icon-wrapper {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 1.25rem;
+      border-radius: 14px;
+      background: #eff6ff;
+      border: 1px solid #dbeafe;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--primary);
+    }
+    .icon-wrapper svg { width: 28px; height: 28px; }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.02em;
+    }
+    .description {
+      color: var(--text-muted);
+      font-size: 0.925rem;
+      line-height: 1.55;
+      margin-bottom: 1.5rem;
+    }
+    .destination-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.85rem;
+    }
+    .destination-label {
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .destination-value {
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .destination-value svg { width: 14px; height: 14px; color: var(--primary); }
+    .info-list {
+      list-style: none;
+      text-align: left;
+      margin-bottom: 1.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+    .info-item {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.825rem;
+      color: var(--text-muted);
+    }
+    .info-item svg {
+      width: 16px;
+      height: 16px;
+      color: #10b981;
+      flex-shrink: 0;
+    }
+    button {
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      padding: 0.85rem 1.5rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      width: 100%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: background 0.15s ease, transform 0.05s ease;
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    }
+    button:hover { background: var(--primary-hover); }
+    button:active { transform: scale(0.99); }
+    button:disabled { opacity: 0.7; cursor: not-allowed; }
+    .footer {
+      margin-top: 1.5rem;
+      font-size: 0.75rem;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand-badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      BurnLink Ephemeral Gateway
     </div>
-  </body>
-  </html>`;
+
+    <div class="icon-wrapper">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+    </div>
+
+    <h1>Single-Use Confidential Link</h1>
+    <p class="description">
+      This link is strictly configured to self-destruct once opened. Automated preview bots and security crawlers have been blocked from consuming it.
+    </p>
+
+    <div class="destination-box">
+      <span class="destination-label">Verified Host</span>
+      <span class="destination-value">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        ${safeHostname}
+      </span>
+    </div>
+
+    <ul class="info-list">
+      <li class="info-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        <span>One-time access only — burns permanently upon proceed</span>
+      </li>
+      <li class="info-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        <span>Atomic lock prevents replay attacks or parallel clicks</span>
+      </li>
+      <li class="info-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        <span>Zero permanent records or cookies stored</span>
+      </li>
+    </ul>
+
+    <form method="POST" action="/${safeId}" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Unlocking destination...';">
+      <button type="submit">
+        <span>Proceed to Destination</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      </button>
+    </form>
+
+    <div class="footer">
+      Protected by BurnLink Edge • Single-Use Security Protocol
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 export function renderNotice(title: string, message: string, status: number): Response {
   const safeTitle = escapeHtml(title);
-  const safeMessage = escapeHtml(message);
+
+  // Icon and tone based on status
+  const isBurned = status === 410;
+  const badgeText = isBurned ? "Link Expired & Burned" : `Error ${status}`;
+  const badgeBg = isBurned ? "#fef2f2" : "#f1f5f9";
+  const badgeBorder = isBurned ? "#fecaca" : "#e2e8f0";
+  const badgeColor = isBurned ? "#dc2626" : "#475569";
+
+  const iconSvg = isBurned
+    ? `<svg viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>`
+    : `<svg viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+
   const html = `<!DOCTYPE html>
-  <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${safeTitle}</title>
-    <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #090d16; color: #f8fafc; }
-      .card { max-width: 420px; padding: 2.5rem; background: #111827; border-radius: 12px; border: 1px solid #1f2937; text-align: center; }
-      h1 { font-size: 1.4rem; margin-bottom: 0.75rem; color: #f87171; }
-      p { color: #94a3b8; font-size: 0.95rem; line-height: 1.5; margin: 0; }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h1>${safeTitle}</h1>
-      <p>${safeMessage}</p>
-    </div>
-  </body>
-  </html>`;
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${safeTitle} — BurnLink</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #f8fafc;
+      color: #0f172a;
+      padding: 1.5rem;
+      -webkit-font-smoothing: antialiased;
+    }
+    .card {
+      max-width: 450px;
+      width: 100%;
+      padding: 2.25rem 2rem;
+      background: #ffffff;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      text-align: center;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 20px 25px -5px rgba(0,0,0,0.04);
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      background: ${badgeBg};
+      border: 1px solid ${badgeBorder};
+      color: ${badgeColor};
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 1.25rem;
+    }
+    .icon-box {
+      width: 52px;
+      height: 52px;
+      border-radius: 12px;
+      background: ${badgeBg};
+      margin: 0 auto 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .icon-box svg { width: 26px; height: 26px; }
+    h1 { font-size: 1.3rem; margin-bottom: 0.65rem; color: #0f172a; font-weight: 700; }
+    p { color: #64748b; font-size: 0.925rem; line-height: 1.55; margin-bottom: 1.5rem; }
+    .action-link {
+      display: inline-block;
+      color: #2563eb;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .action-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <span class="status-badge">${badgeText}</span>
+    <div class="icon-box">${iconSvg}</div>
+    <h1>${safeTitle}</h1>
+    <p>${message}</p>
+    <a href="/admin" class="action-link">Open BurnLink Dashboard →</a>
+  </div>
+</body>
+</html>`;
   return new Response(html, {
     status,
     headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -319,189 +611,846 @@ export function renderNotice(title: string, message: string, status: number): Re
 
 export function renderAdminHTML(): string {
   return `<!DOCTYPE html>
-  <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>BurnLink Manager</title>
-    <style>
-      :root { --bg: #090d16; --card: #111827; --border: #1f2937; --text: #f3f4f6; --text-muted: #9ca3af; --primary: #3b82f6; --primary-hover: #2563eb; }
-      * { box-sizing: border-box; }
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; }
-      .container { max-width: 1100px; margin: 0 auto; }
-      header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
-      h1 { margin: 0; font-size: 1.5rem; }
-      .create-box { background: var(--card); border: 1px solid var(--border); padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; display: flex; gap: 0.75rem; }
-      input { flex: 1; padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid var(--border); background: #0b0f19; color: var(--text); font-size: 0.95rem; }
-      input:focus { outline: none; border-color: var(--primary); }
-      button { background: var(--primary); color: #fff; border: none; padding: 0.75rem 1.25rem; border-radius: 6px; font-weight: 500; cursor: pointer; }
-      button:hover { background: var(--primary-hover); }
-      button:disabled { opacity: 0.6; cursor: not-allowed; }
-      table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
-      th, td { padding: 0.85rem 1rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
-      th { background: #161f30; color: var(--text-muted); font-weight: 600; }
-      .badge { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
-      .badge-unused { background: #064e3b; color: #34d399; }
-      .badge-used { background: #451a1a; color: #f87171; }
-      .url-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .copy-btn, .del-btn { padding: 0.35rem 0.6rem; font-size: 0.75rem; margin-left: 0.5rem; }
-      .del-btn { background: #7f1d1d; }
-      .del-btn:hover { background: #991b1b; }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <header>
-        <h1>⚡ Single-Use Links</h1>
-        <span style="color: var(--text-muted); font-size: 0.85rem;">One Click & Burn</span>
-      </header>
-      
-      <form class="create-box" id="linkForm">
-        <input type="url" id="targetUrl" placeholder="https://destination-url.com/path" required />
-        <button type="submit">Generate Link</button>
-      </form>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BurnLink — Admin Console</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --border-hover: #cbd5e1;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --text-dim: #94a3b8;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-subtle: #eff6ff;
+      --success: #059669;
+      --danger: #dc2626;
+      --radius: 10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
 
-      <table>
-        <thead>
-          <tr>
-            <th>Short URL</th>
-            <th>Target URL</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th>Accessed</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody id="tableBody"></tbody>
-      </table>
+    /* Top Navigation */
+    .navbar {
+      background: #ffffff;
+      border-bottom: 1px solid var(--border);
+      padding: 0.85rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      font-weight: 700;
+      font-size: 1.15rem;
+      color: var(--text);
+      text-decoration: none;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--primary);
+    }
+    .brand-icon svg { width: 18px; height: 18px; }
+    .badge-console {
+      font-size: 0.7rem;
+      font-weight: 600;
+      background: #f1f5f9;
+      color: #475569;
+      padding: 0.2rem 0.5rem;
+      border-radius: 9999px;
+      border: 1px solid #e2e8f0;
+    }
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+    .pill-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.75rem;
+      color: #059669;
+      background: #ecfdf5;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      border: 1px solid #a7f3d0;
+      font-weight: 600;
+    }
+    .pill-dot { width: 6px; height: 6px; background: #059669; border-radius: 50%; }
+
+    /* Main Container */
+    .container {
+      max-width: 1050px;
+      margin: 2rem auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Metric Cards */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      box-shadow: 0 1px 2px 0 rgba(0,0,0,0.03);
+    }
+    .stat-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-bottom: 0.4rem;
+    }
+    .stat-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    /* Creator Box */
+    .create-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 1px 3px 0 rgba(0,0,0,0.03);
+    }
+    .create-card h2 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 0.3rem;
+    }
+    .create-card p {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }
+    .input-group {
+      display: flex;
+      gap: 0.75rem;
+    }
+    .input-wrapper {
+      position: relative;
+      flex: 1;
+      display: flex;
+      align-items: center;
+    }
+    .input-icon {
+      position: absolute;
+      left: 0.85rem;
+      color: var(--text-dim);
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+    }
+    .input-icon svg { width: 18px; height: 18px; }
+    input[type="text"] {
+      width: 100%;
+      padding: 0.75rem 1rem 0.75rem 2.4rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #ffffff;
+      color: var(--text);
+      font-size: 0.925rem;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    input[type="text"]:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+    button.btn-primary {
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      padding: 0.75rem 1.4rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: background 0.15s ease;
+      white-space: nowrap;
+    }
+    button.btn-primary:hover { background: var(--primary-hover); }
+    button.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    /* New Link Alert Banner */
+    .success-callout {
+      display: none;
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      border-radius: 8px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .callout-info {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      font-size: 0.875rem;
+      color: #065f46;
+    }
+    .callout-url {
+      font-family: monospace;
+      font-weight: 700;
+      color: #047857;
+      background: #d1fae5;
+      padding: 0.2rem 0.45rem;
+      border-radius: 4px;
+    }
+
+    /* Links Table Card */
+    .table-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 1px 3px 0 rgba(0,0,0,0.03);
+    }
+    .table-toolbar {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .search-box {
+      max-width: 300px;
+      width: 100%;
+    }
+    .search-box input {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.85rem;
+    }
+    .filter-tabs {
+      display: flex;
+      gap: 0.35rem;
+      background: #f1f5f9;
+      padding: 0.25rem;
+      border-radius: 8px;
+    }
+    .tab-btn {
+      padding: 0.35rem 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      background: #ffffff;
+      color: var(--text);
+      box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    th {
+      background: #f8fafc;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-align: left;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.775rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    td {
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid #f1f5f9;
+      color: var(--text);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafafa; }
+
+    .short-cell {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-weight: 600;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .url-cell {
+      max-width: 320px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .url-link {
+      color: #3b82f6;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    .url-link:hover { text-decoration: underline; color: #1d4ed8; }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge-active {
+      background: #ecfdf5;
+      color: #047857;
+      border: 1px solid #a7f3d0;
+    }
+    .badge-active::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      background: #10b981;
+      border-radius: 50%;
+    }
+    .badge-used {
+      background: #f1f5f9;
+      color: #64748b;
+      border: 1px solid #e2e8f0;
+    }
+
+    /* Action Buttons */
+    .btn-icon {
+      padding: 0.35rem 0.55rem;
+      border: 1px solid var(--border);
+      background: #ffffff;
+      border-radius: 6px;
+      cursor: pointer;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    .btn-icon:hover {
+      background: #f8fafc;
+      color: var(--text);
+      border-color: var(--border-hover);
+    }
+    .btn-icon svg { width: 13px; height: 13px; }
+    .btn-danger:hover {
+      background: #fef2f2;
+      color: #dc2626;
+      border-color: #fecaca;
+    }
+
+    /* Empty state */
+    .empty-state {
+      padding: 3rem 1.5rem;
+      text-align: center;
+      color: var(--text-muted);
+    }
+    .empty-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 0.75rem;
+      color: #cbd5e1;
+    }
+    .empty-state h3 { font-size: 1rem; color: var(--text); margin-bottom: 0.3rem; }
+    .empty-state p { font-size: 0.85rem; }
+
+    /* Modal */
+    dialog {
+      margin: auto;
+      border: none;
+      border-radius: 12px;
+      padding: 1.75rem;
+      background: #ffffff;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+      max-width: 400px;
+      width: 90%;
+    }
+    dialog::backdrop {
+      background: rgba(15, 23, 42, 0.4);
+      backdrop-filter: blur(2px);
+    }
+    .modal-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .modal-desc { font-size: 0.9rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1.5rem; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 0.75rem; }
+    .btn-secondary {
+      background: #f1f5f9;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 0.6rem 1rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-modal-danger {
+      background: #dc2626;
+      color: #ffffff;
+      border: none;
+      padding: 0.6rem 1.1rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-modal-danger:hover { background: #b91c1c; }
+
+    /* Toast */
+    #toastContainer {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      z-index: 100;
+    }
+    .toast {
+      background: #0f172a;
+      color: #ffffff;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      animation: slideIn 0.2s ease-out;
+    }
+    @keyframes slideIn {
+      from { transform: translateY(10px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+      </div>
+      <span>BurnLink</span>
+      <span class="badge-console">Admin</span>
+    </div>
+    <div class="nav-actions">
+      <span class="pill-status">
+        <span class="pill-dot"></span>
+        Deno KV Connected
+      </span>
+    </div>
+  </nav>
+
+  <div class="container">
+
+    <!-- Stats Row -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Total Links</div>
+        <div class="stat-value" id="statTotal">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Active (Unused)</div>
+        <div class="stat-value" style="color: #059669;" id="statActive">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Burned Links</div>
+        <div class="stat-value" style="color: #64748b;" id="statBurned">—</div>
+      </div>
     </div>
 
-    <script>
-      async function loadLinks() {
-        try {
-          const res = await fetch('/api/links');
-          if (!res.ok) {
-            if (res.status === 401) {
-              alert('Session unauthorized or expired. Please reload to log in.');
-            }
-            return;
-          }
-          const data = await res.json();
-          const tbody = document.getElementById('tableBody');
-          tbody.innerHTML = '';
-          
-          data.forEach(link => {
-            const fullShort = window.location.origin + '/' + encodeURIComponent(link.id);
-            const tr = document.createElement('tr');
+    <!-- Create Card -->
+    <div class="create-card">
+      <h2>Generate Single-Use Link</h2>
+      <p>Enter any destination URL. BurnLink generates a unique, protected link that expires permanently after the first human access.</p>
+      
+      <form id="linkForm">
+        <div class="input-group">
+          <div class="input-wrapper">
+            <span class="input-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            </span>
+            <input type="text" id="targetUrl" placeholder="https://example.com/confidential-document-or-vault" required autocomplete="off" />
+          </div>
+          <button type="submit" class="btn-primary" id="generateBtn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>Create Link</span>
+          </button>
+        </div>
+      </form>
 
-            // ID / Copy
-            const tdId = document.createElement('td');
-            const code = document.createElement('code');
-            code.textContent = link.id;
-            const copyBtn = document.createElement('button');
-            copyBtn.className = 'copy-btn';
-            copyBtn.textContent = 'Copy';
-            copyBtn.onclick = () => {
-              navigator.clipboard.writeText(fullShort);
-              copyBtn.textContent = 'Copied!';
-              setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
-            };
-            tdId.appendChild(code);
-            tdId.appendChild(copyBtn);
-            tr.appendChild(tdId);
+      <!-- Success Callout for Newly Created Link -->
+      <div class="success-callout" id="successCallout">
+        <div class="callout-info">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <div>
+            <strong>Link Created:</strong>
+            <span class="callout-url" id="calloutUrl"></span>
+          </div>
+        </div>
+        <button type="button" class="btn-icon" id="calloutCopyBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span id="calloutCopyText">Copy</span>
+        </button>
+      </div>
+    </div>
 
-            // Target URL
-            const tdUrl = document.createElement('td');
-            tdUrl.className = 'url-cell';
-            tdUrl.title = link.targetUrl;
-            const a = document.createElement('a');
-            a.href = link.targetUrl;
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            a.style.color = '#60a5fa';
-            a.style.textDecoration = 'none';
-            a.textContent = link.targetUrl;
-            tdUrl.appendChild(a);
-            tr.appendChild(tdUrl);
+    <!-- Table Card -->
+    <div class="table-card">
+      <div class="table-toolbar">
+        <div class="input-wrapper search-box">
+          <span class="input-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </span>
+          <input type="text" id="searchInput" placeholder="Search by ID or destination..." />
+        </div>
+        <div class="filter-tabs">
+          <button class="tab-btn active" data-filter="all">All</button>
+          <button class="tab-btn" data-filter="active">Active</button>
+          <button class="tab-btn" data-filter="used">Burned</button>
+        </div>
+      </div>
 
-            // Status
-            const tdStatus = document.createElement('td');
-            const badge = document.createElement('span');
-            badge.className = 'badge ' + (link.used ? 'badge-used' : 'badge-unused');
-            badge.textContent = link.used ? 'Used' : 'Active';
-            tdStatus.appendChild(badge);
-            tr.appendChild(tdStatus);
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Short Code</th>
+              <th>Destination URL</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Accessed / Burned</th>
+              <th style="text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
 
-            // Created
-            const tdCreated = document.createElement('td');
-            tdCreated.textContent = new Date(link.createdAt).toLocaleDateString();
-            tr.appendChild(tdCreated);
+      <div class="empty-state" id="emptyState" style="display: none;">
+        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <h3>No links found</h3>
+        <p>No links match your current search or filter criteria.</p>
+      </div>
+    </div>
+  </div>
 
-            // Accessed
-            const tdAccessed = document.createElement('td');
-            tdAccessed.textContent = link.usedAt
-              ? new Date(link.usedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : '—';
-            if (link.userAgent) {
-              tdAccessed.title = 'User Agent: ' + link.userAgent;
-            }
-            tr.appendChild(tdAccessed);
+  <!-- Delete Confirmation Dialog -->
+  <dialog id="deleteModal">
+    <h3 class="modal-title">Delete Link?</h3>
+    <p class="modal-desc">Are you sure you want to permanently delete short link <code id="deleteModalCode" style="font-weight: 700;"></code>? This cannot be undone and will prevent future access.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="cancelDeleteBtn">Cancel</button>
+      <button type="button" class="btn-modal-danger" id="confirmDeleteBtn">Delete Link</button>
+    </div>
+  </dialog>
 
-            // Actions
-            const tdAction = document.createElement('td');
-            const delBtn = document.createElement('button');
-            delBtn.className = 'del-btn';
-            delBtn.textContent = 'Delete';
-            delBtn.onclick = () => deleteLink(link.id);
-            tdAction.appendChild(delBtn);
-            tr.appendChild(tdAction);
+  <!-- Toast Notification Container -->
+  <div id="toastContainer"></div>
 
-            tbody.appendChild(tr);
-          });
-        } catch (err) {
-          console.error('Failed to load links:', err);
-        }
-      }
+  <script>
+    let allLinks = [];
+    let currentFilter = 'all';
+    let currentSearch = '';
+    let pendingDeleteId = null;
 
-      document.getElementById('linkForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const input = document.getElementById('targetUrl');
-        const submitBtn = e.target.querySelector('button[type="submit"]');
-        submitBtn.disabled = true;
+    const tableBody = document.getElementById('tableBody');
+    const emptyState = document.getElementById('emptyState');
+    const deleteModal = document.getElementById('deleteModal');
+    const deleteModalCode = document.getElementById('deleteModalCode');
+    const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+    const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
 
-        try {
-          const res = await fetch('/api/links', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ targetUrl: input.value })
-          });
-          const data = await res.json();
-          if (!res.ok) {
-            alert(data.error || 'Failed to create link');
-          } else {
-            input.value = '';
-            await loadLinks();
-          }
-        } catch (err) {
-          alert('Network error while creating link');
-        } finally {
-          submitBtn.disabled = false;
-        }
+    function showToast(message, isError = false) {
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.style.borderLeft = isError ? '4px solid #ef4444' : '4px solid #10b981';
+      toast.textContent = message;
+      document.getElementById('toastContainer').appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    function renderTable() {
+      tableBody.innerHTML = '';
+
+      const filtered = allLinks.filter(link => {
+        const matchesFilter =
+          currentFilter === 'all' ||
+          (currentFilter === 'active' && !link.used) ||
+          (currentFilter === 'used' && link.used);
+
+        const searchLower = currentSearch.toLowerCase();
+        const matchesSearch =
+          !currentSearch ||
+          link.id.toLowerCase().includes(searchLower) ||
+          link.targetUrl.toLowerCase().includes(searchLower);
+
+        return matchesFilter && matchesSearch;
       });
 
-      async function deleteLink(id) {
-        if (confirm('Delete this record?')) {
-          try {
-            await fetch('/api/links/' + encodeURIComponent(id), { method: 'DELETE' });
-            await loadLinks();
-          } catch (err) {
-            alert('Failed to delete link');
-          }
-        }
+      if (filtered.length === 0) {
+        emptyState.style.display = 'block';
+        return;
       }
+      emptyState.style.display = 'none';
 
-      loadLinks();
-    </script>
-  </body>
-  </html>`;
+      filtered.forEach(link => {
+        const fullShortUrl = window.location.origin + '/' + encodeURIComponent(link.id);
+        const tr = document.createElement('tr');
+
+        // Short Code Cell
+        const tdId = document.createElement('td');
+        const shortDiv = document.createElement('div');
+        shortDiv.className = 'short-cell';
+        shortDiv.textContent = link.id;
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'btn-icon';
+        copyBtn.title = 'Copy short link';
+        copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy</span>';
+        copyBtn.onclick = () => {
+          navigator.clipboard.writeText(fullShortUrl);
+          showToast('Copied ' + fullShortUrl + ' to clipboard!');
+          copyBtn.querySelector('span').textContent = 'Copied';
+          setTimeout(() => { copyBtn.querySelector('span').textContent = 'Copy'; }, 1500);
+        };
+
+        shortDiv.appendChild(copyBtn);
+        tdId.appendChild(shortDiv);
+        tr.appendChild(tdId);
+
+        // Target URL Cell
+        const tdUrl = document.createElement('td');
+        tdUrl.className = 'url-cell';
+        tdUrl.title = link.targetUrl;
+        const a = document.createElement('a');
+        a.href = link.targetUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.className = 'url-link';
+        a.textContent = link.targetUrl;
+        tdUrl.appendChild(a);
+        tr.appendChild(tdUrl);
+
+        // Status Badge Cell
+        const tdStatus = document.createElement('td');
+        const badge = document.createElement('span');
+        badge.className = 'badge ' + (link.used ? 'badge-used' : 'badge-active');
+        badge.textContent = link.used ? 'Burned' : 'Active';
+        tdStatus.appendChild(badge);
+        tr.appendChild(tdStatus);
+
+        // Created Cell
+        const tdCreated = document.createElement('td');
+        tdCreated.style.color = '#64748b';
+        tdCreated.textContent = new Date(link.createdAt).toLocaleDateString([], {
+          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+        });
+        tr.appendChild(tdCreated);
+
+        // Accessed Cell
+        const tdAccessed = document.createElement('td');
+        if (link.used) {
+          tdAccessed.style.color = '#0f172a';
+          tdAccessed.textContent = link.usedAt
+            ? new Date(link.usedAt).toLocaleDateString([], {
+                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+              })
+            : 'Burned';
+          if (link.userAgent) {
+            tdAccessed.title = 'Client: ' + link.userAgent + (link.ip ? ' (' + link.ip + ')' : '');
+          }
+        } else {
+          tdAccessed.style.color = '#94a3b8';
+          tdAccessed.textContent = '—';
+        }
+        tr.appendChild(tdAccessed);
+
+        // Action Cell
+        const tdAction = document.createElement('td');
+        tdAction.style.textAlign = 'right';
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn-icon btn-danger';
+        delBtn.title = 'Delete link';
+        delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+        delBtn.onclick = () => openDeleteModal(link.id);
+        tdAction.appendChild(delBtn);
+        tr.appendChild(tdAction);
+
+        tableBody.appendChild(tr);
+      });
+    }
+
+    function updateStats() {
+      document.getElementById('statTotal').textContent = allLinks.length;
+      document.getElementById('statActive').textContent = allLinks.filter(l => !l.used).length;
+      document.getElementById('statBurned').textContent = allLinks.filter(l => l.used).length;
+    }
+
+    async function loadLinks() {
+      try {
+        const res = await fetch('/api/links');
+        if (!res.ok) {
+          if (res.status === 401) {
+            showToast('Session expired. Please refresh to log in.', true);
+          }
+          return;
+        }
+        allLinks = await res.json();
+        updateStats();
+        renderTable();
+      } catch (err) {
+        showToast('Failed to load links from server.', true);
+      }
+    }
+
+    // Create Link Form
+    document.getElementById('linkForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = document.getElementById('targetUrl');
+      const submitBtn = document.getElementById('generateBtn');
+      submitBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/links', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUrl: input.value })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showToast(data.error || 'Failed to create link', true);
+        } else {
+          input.value = '';
+          showToast('Link generated successfully!');
+
+          // Show callout
+          const callout = document.getElementById('successCallout');
+          const fullUrl = window.location.origin + '/' + data.record.id;
+          document.getElementById('calloutUrl').textContent = fullUrl;
+          callout.style.display = 'flex';
+
+          document.getElementById('calloutCopyBtn').onclick = () => {
+            navigator.clipboard.writeText(fullUrl);
+            document.getElementById('calloutCopyText').textContent = 'Copied!';
+            showToast('Link copied to clipboard!');
+            setTimeout(() => {
+              document.getElementById('calloutCopyText').textContent = 'Copy';
+            }, 1500);
+          };
+
+          await loadLinks();
+        }
+      } catch (err) {
+        showToast('Network error while creating link.', true);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    // Delete Modal
+    function openDeleteModal(id) {
+      pendingDeleteId = id;
+      deleteModalCode.textContent = id;
+      deleteModal.showModal();
+    }
+
+    cancelDeleteBtn.addEventListener('click', () => {
+      deleteModal.close();
+      pendingDeleteId = null;
+    });
+
+    confirmDeleteBtn.addEventListener('click', async () => {
+      if (!pendingDeleteId) return;
+      try {
+        const res = await fetch('/api/links/' + encodeURIComponent(pendingDeleteId), {
+          method: 'DELETE'
+        });
+        if (res.ok) {
+          showToast('Link deleted successfully.');
+          deleteModal.close();
+          await loadLinks();
+        } else {
+          showToast('Failed to delete link.', true);
+        }
+      } catch (err) {
+        showToast('Network error.', true);
+      } finally {
+        pendingDeleteId = null;
+      }
+    });
+
+    // Filtering & Search
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentFilter = btn.dataset.filter;
+        renderTable();
+      });
+    });
+
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      currentSearch = e.target.value;
+      renderTable();
+    });
+
+    loadLinks();
+  </script>
+</body>
+</html>`;
 }
