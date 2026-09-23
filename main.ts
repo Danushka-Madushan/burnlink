@@ -305,6 +305,11 @@ export function renderInterstitialHTML(id: string, targetUrl?: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BurnLink - Secure Single-Use Gateway</title>
 
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <!-- OpenGraph tags for Discord, Slack, iMessage, and social crawlers -->
   <meta property="og:title" content="BurnLink - Single-Use Confidential Link" />
   <meta property="og:description" content="This is an ephemeral link set to self-destruct after one view. Click to proceed securely." />
@@ -324,7 +329,7 @@ export function renderInterstitialHTML(id: string, targetUrl?: string): string {
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
       background-color: var(--bg);
       background-image: radial-gradient(circle at 50% 0%, #e0e7ff 0%, #f8fafc 55%);
       color: var(--text);
@@ -396,11 +401,13 @@ export function renderInterstitialHTML(id: string, targetUrl?: string): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 1rem;
       font-size: 0.85rem;
     }
     .destination-label {
       color: var(--text-muted);
       font-weight: 500;
+      white-space: nowrap;
     }
     .destination-value {
       font-weight: 600;
@@ -408,28 +415,39 @@ export function renderInterstitialHTML(id: string, targetUrl?: string): string {
       display: flex;
       align-items: center;
       gap: 0.35rem;
+      max-width: 250px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .destination-value svg { width: 14px; height: 14px; color: var(--primary); }
+    .destination-value svg {
+      width: 14px;
+      height: 14px;
+      color: var(--primary);
+      flex-shrink: 0;
+    }
     .info-list {
       list-style: none;
       text-align: left;
       margin-bottom: 1.75rem;
       display: flex;
       flex-direction: column;
-      gap: 0.6rem;
+      gap: 0.65rem;
     }
     .info-item {
       display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      font-size: 0.825rem;
+      align-items: flex-start;
+      gap: 0.65rem;
+      font-size: 0.85rem;
       color: var(--text-muted);
+      line-height: 1.45;
     }
     .info-item svg {
       width: 16px;
       height: 16px;
       color: #10b981;
       flex-shrink: 0;
+      margin-top: 2px;
     }
     button {
       background: var(--primary);
@@ -535,10 +553,16 @@ export function renderNotice(title: string, message: string, status: number): Re
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${safeTitle} - BurnLink</title>
+
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -616,6 +640,12 @@ export function renderAdminHTML(): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BurnLink - Admin Console</title>
+
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <style>
     :root {
       --bg: #f8fafc;
@@ -634,7 +664,7 @@ export function renderAdminHTML(): string {
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
@@ -769,16 +799,20 @@ export function renderAdminHTML(): string {
     }
     .input-icon {
       position: absolute;
-      left: 0.85rem;
+      left: 0.9rem;
+      top: 50%;
+      transform: translateY(-50%);
       color: var(--text-dim);
       pointer-events: none;
       display: flex;
       align-items: center;
+      justify-content: center;
+      z-index: 2;
     }
-    .input-icon svg { width: 18px; height: 18px; }
+    .input-icon svg { width: 17px; height: 17px; }
     input[type="text"] {
       width: 100%;
-      padding: 0.75rem 1rem 0.75rem 2.4rem;
+      padding: 0.75rem 1rem 0.75rem 2.6rem;
       border-radius: 8px;
       border: 1px solid var(--border);
       background: #ffffff;
@@ -855,29 +889,40 @@ export function renderAdminHTML(): string {
       flex-wrap: wrap;
     }
     .search-box {
-      max-width: 300px;
+      max-width: 280px;
       width: 100%;
     }
     .search-box .input-icon {
-      left: 0.75rem;
+      left: 0.8rem;
+      top: 50%;
+      transform: translateY(-50%);
     }
     .search-box .input-icon svg {
-      width: 15px;
-      height: 15px;
+      width: 14px;
+      height: 14px;
     }
     .search-box input {
-      padding: 0.55rem 0.75rem 0.55rem 2.25rem;
-      font-size: 0.85rem;
+      height: 32px;
+      padding: 0.45rem 0.85rem 0.45rem 2.35rem;
+      font-size: 0.825rem;
+      border-radius: 7px;
+    }
+    .toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
     }
     .filter-tabs {
       display: flex;
-      gap: 0.35rem;
+      gap: 0.25rem;
       background: #f1f5f9;
-      padding: 0.25rem;
+      padding: 0.2rem;
       border-radius: 8px;
+      height: 32px;
+      align-items: center;
     }
     .tab-btn {
-      padding: 0.35rem 0.75rem;
+      padding: 0.25rem 0.65rem;
       font-size: 0.75rem;
       font-weight: 600;
       border: none;
@@ -885,11 +930,41 @@ export function renderAdminHTML(): string {
       color: var(--text-muted);
       border-radius: 6px;
       cursor: pointer;
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      transition: all 0.15s ease;
     }
     .tab-btn.active {
       background: #ffffff;
       color: var(--text);
-      box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+      box-shadow: 0 1px 2px 0 rgba(0,0,0,0.06);
+    }
+    .btn-refresh {
+      padding: 0.4rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      border-radius: 7px;
+      height: 32px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .btn-refresh svg {
+      width: 14px;
+      height: 14px;
+      transition: transform 0.4s ease;
+    }
+    .btn-refresh:hover svg {
+      transform: rotate(180deg);
+    }
+    .btn-refresh.spinning svg {
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
     }
 
     table {
@@ -918,27 +993,44 @@ export function renderAdminHTML(): string {
     tr:hover td { background: #fafafa; }
 
     .short-cell {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .short-cell code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-weight: 600;
       color: var(--primary);
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
+      background: #eff6ff;
+      padding: 0.2rem 0.45rem;
+      border-radius: 5px;
+      border: 1px solid #dbeafe;
+      font-size: 0.825rem;
     }
     .url-cell {
-      max-width: 320px;
+      max-width: 280px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .url-link {
-      color: #3b82f6;
+      color: #2563eb;
       text-decoration: none;
       display: inline-flex;
       align-items: center;
-      gap: 0.3rem;
+      gap: 0.35rem;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .url-link:hover { text-decoration: underline; color: #1d4ed8; }
+    .url-link svg {
+      flex-shrink: 0;
+      width: 12px;
+      height: 12px;
+      color: #94a3b8;
+    }
 
     /* Badges */
     .badge {
@@ -949,6 +1041,7 @@ export function renderAdminHTML(): string {
       border-radius: 9999px;
       font-size: 0.75rem;
       font-weight: 600;
+      line-height: 1;
     }
     .badge-active {
       background: #ecfdf5;
@@ -967,6 +1060,13 @@ export function renderAdminHTML(): string {
       color: #64748b;
       border: 1px solid #e2e8f0;
     }
+    .badge-used::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      background: #94a3b8;
+      border-radius: 50%;
+    }
 
     /* Action Buttons */
     .btn-icon {
@@ -978,10 +1078,12 @@ export function renderAdminHTML(): string {
       color: var(--text-muted);
       display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
+      justify-content: center;
+      gap: 0.3rem;
       font-size: 0.75rem;
       font-weight: 500;
       transition: all 0.15s ease;
+      line-height: 1;
     }
     .btn-icon:hover {
       background: #f8fafc;
@@ -989,10 +1091,29 @@ export function renderAdminHTML(): string {
       border-color: var(--border-hover);
     }
     .btn-icon svg { width: 13px; height: 13px; }
+    .btn-danger {
+      padding: 0.4rem;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+    }
     .btn-danger:hover {
       background: #fef2f2;
       color: #dc2626;
       border-color: #fecaca;
+    }
+
+    @media (max-width: 640px) {
+      .container { margin: 1rem auto; padding: 0 1rem; }
+      .input-group { flex-direction: column; }
+      button.btn-primary { justify-content: center; }
+      .table-toolbar { flex-direction: column; align-items: stretch; gap: 0.75rem; }
+      .search-box { max-width: 100%; }
+      .toolbar-actions { justify-content: space-between; }
     }
 
     /* Empty state */
@@ -1161,10 +1282,16 @@ export function renderAdminHTML(): string {
           </span>
           <input type="text" id="searchInput" placeholder="Search by ID or destination..." />
         </div>
-        <div class="filter-tabs">
-          <button class="tab-btn active" data-filter="all">All</button>
-          <button class="tab-btn" data-filter="active">Active</button>
-          <button class="tab-btn" data-filter="used">Burned</button>
+        <div class="toolbar-actions">
+          <div class="filter-tabs">
+            <button class="tab-btn active" data-filter="all">All</button>
+            <button class="tab-btn" data-filter="active">Active</button>
+            <button class="tab-btn" data-filter="used">Burned</button>
+          </div>
+          <button type="button" class="btn-icon btn-refresh" id="refreshBtn" title="Refresh links list">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+            <span>Refresh</span>
+          </button>
         </div>
       </div>
 
@@ -1263,7 +1390,9 @@ export function renderAdminHTML(): string {
         const tdId = document.createElement('td');
         const shortDiv = document.createElement('div');
         shortDiv.className = 'short-cell';
-        shortDiv.textContent = link.id;
+
+        const code = document.createElement('code');
+        code.textContent = link.id;
 
         const copyBtn = document.createElement('button');
         copyBtn.className = 'btn-icon';
@@ -1276,6 +1405,7 @@ export function renderAdminHTML(): string {
           setTimeout(() => { copyBtn.querySelector('span').textContent = 'Copy'; }, 1500);
         };
 
+        shortDiv.appendChild(code);
         shortDiv.appendChild(copyBtn);
         tdId.appendChild(shortDiv);
         tr.appendChild(tdId);
@@ -1289,7 +1419,7 @@ export function renderAdminHTML(): string {
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
         a.className = 'url-link';
-        a.textContent = link.targetUrl;
+        a.innerHTML = '<span>' + escapeHtml(link.targetUrl) + '</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
         tdUrl.appendChild(a);
         tr.appendChild(tdUrl);
 
@@ -1455,6 +1585,24 @@ export function renderAdminHTML(): string {
       currentSearch = e.target.value;
       renderTable();
     });
+
+    // Refresh Button
+    const refreshBtn = document.getElementById('refreshBtn');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', async () => {
+        refreshBtn.classList.add('spinning');
+        refreshBtn.disabled = true;
+        try {
+          await loadLinks();
+          showToast('Links refreshed!');
+        } finally {
+          setTimeout(() => {
+            refreshBtn.classList.remove('spinning');
+            refreshBtn.disabled = false;
+          }, 400);
+        }
+      });
+    }
 
     loadLinks();
   </script>
