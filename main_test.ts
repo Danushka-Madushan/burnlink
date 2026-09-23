@@ -2,6 +2,7 @@ import { assertEquals, assertNotEquals } from "@std/assert";
 import {
   escapeHtml,
   generateId,
+  handleRequest,
   isAuthenticated,
   isValidUrl,
   kv,
@@ -49,6 +50,15 @@ Deno.test("isAuthenticated verifies basic auth header", () => {
   });
   assertEquals(isAuthenticated(validReq, user, pass), true);
 
+  // Password containing colons
+  const passWithColons = "secret:complex:pass:123";
+  const complexReq = new Request("http://localhost/admin", {
+    headers: {
+      Authorization: `Basic ${btoa(`${user}:${passWithColons}`)}`,
+    },
+  });
+  assertEquals(isAuthenticated(complexReq, user, passWithColons), true);
+
   // Invalid password
   const invalidPassReq = new Request("http://localhost/admin", {
     headers: {
@@ -81,11 +91,13 @@ Deno.test("escapeHtml sanitizes HTML special characters", () => {
   assertEquals(safe.includes("&#039;"), true);
 });
 
-Deno.test("renderInterstitialHTML produces expected markup", () => {
+Deno.test("renderInterstitialHTML produces expected markup with verified host", () => {
   const id = "abc1234";
-  const html = renderInterstitialHTML(id);
+  const targetUrl = "https://github.com/Danushka-Madushan/burnlink";
+  const html = renderInterstitialHTML(id, targetUrl);
 
-  assertEquals(html.includes("Single-Use Link"), true);
+  assertEquals(html.includes("Single-Use Confidential Link"), true);
+  assertEquals(html.includes("github.com"), true);
   assertEquals(html.includes('action="/abc1234"'), true);
   assertEquals(html.includes('method="POST"'), true);
 });
@@ -98,6 +110,19 @@ Deno.test("renderNotice returns proper Response status and content", async () =>
   const body = await res.text();
   assertEquals(body.includes("Test Title"), true);
   assertEquals(body.includes("Test Message"), true);
+});
+
+Deno.test("handleRequest serves favicon.ico and robots.txt", async () => {
+  const faviconReq = new Request("http://localhost/favicon.ico");
+  const faviconRes = await handleRequest(faviconReq);
+  assertEquals(faviconRes.status, 200);
+  assertEquals(faviconRes.headers.get("Content-Type"), "image/svg+xml");
+
+  const robotsReq = new Request("http://localhost/robots.txt");
+  const robotsRes = await handleRequest(robotsReq);
+  assertEquals(robotsRes.status, 200);
+  const robotsText = await robotsRes.text();
+  assertEquals(robotsText.includes("Disallow: /admin"), true);
 });
 
 // Close KV after all tests complete
