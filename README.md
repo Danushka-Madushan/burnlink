@@ -1,6 +1,5 @@
 # 🔒 BurnLink
 
-[![CI](https://github.com/Danushka-Madushan/burnlink/actions/workflows/ci.yml/badge.svg)](https://github.com/Danushka-Madushan/burnlink/actions/workflows/ci.yml)
 [![Deno](https://img.shields.io/badge/Deno-v2.x-black?logo=deno)](https://deno.land)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
