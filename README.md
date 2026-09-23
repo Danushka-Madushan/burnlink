@@ -20,8 +20,6 @@
   <em>Share confidential destination URLs via ephemeral links configured to burn immediately upon first access. Built-in immunity against automated bot crawlers and social link unfurlers.</em>
 </p>
 
----
-
 ## ⚡ Features
 
 - **Single-Use Guarantee:** Atomic check-and-set transactions (`kv.atomic()`) prevent race conditions and guarantee links burn exactly once.
@@ -36,8 +34,6 @@
 - **Zero External Dependencies:** Built 100% with native Web & Deno standard runtime APIs.
 - **Security Hardened:** XSS-immune DOM rendering, protocol validation (`http:` / `https:`), and HTTP Basic Authentication.
 - **Full TypeScript Autocomplete:** Native autocomplete and typings configured directly via `deno.json`.
-
----
 
 ## 📐 Architecture & Logic
 
@@ -56,7 +52,7 @@ BurnLink uses an interstitial click-to-burn pattern rather than trying to mainta
 2. **POST `/:id`:** The recipient clicks "Proceed to Destination".
 3. **Atomic Burn:** The server executes `kv.atomic().check().set().commit()`. If valid, the link is marked as used with a timestamp and user-agent, then redirected via `303 See Other`. Any concurrent request fails the atomic check and receives a `410 Gone`.
 
----
+
 
 ## 🚀 Quick Start (Local Development)
 
@@ -89,7 +85,7 @@ deno task dev
 ```
 Visit `http://localhost:8000/admin` in your browser.
 
----
+
 
 ## 💻 Editor Setup & Zero-Config Typings
 
@@ -98,7 +94,7 @@ This repository is 100% self-contained and **does not require a `.vscode/` direc
 - **VS Code / Cursor:** Install the official [Deno extension](https://marketplace.visualstudio.com/items?itemName=denoland.vscode-deno). It automatically detects `deno.json` at the project root and activates the Deno Language Server (LSP) for seamless autocomplete, type definitions, and in-editor linting.
 - **Zed / Neovim / Helix:** Point your editor's built-in LSP to `deno lsp` for native completion and diagnostics.
 
----
+
 
 ## 🛠 Available Tasks
 
@@ -114,7 +110,7 @@ deno task fmt        # Format code
 deno task fmt:check  # Check formatting without modifying files
 ```
 
----
+
 
 ## ☁️ Deployment on Deno Deploy
 
@@ -137,7 +133,7 @@ BurnLink is designed for 1-click zero-config deployment on [Deno Deploy](https:/
 2. Copy and paste the contents of `main.ts`.
 3. Set `ADMIN_USER` and `ADMIN_PASS` in project settings.
 
----
+
 
 ## 📡 API Reference
 
@@ -176,7 +172,7 @@ GET /api/links
 DELETE /api/links/:id
 ```
 
----
+
 
 ## 📄 License
 
