@@ -1,14 +1,24 @@
-# 🔒 BurnLink
+<p align="center">
+  <a href="https://github.com/Danushka-Madushan/burnlink">
+    <img src="favicon.svg" alt="BurnLink Logo" width="80" height="80" />
+  </a>
+</p>
 
-[![Deno](https://img.shields.io/badge/Deno-v2.x-black?logo=deno)](https://deno.land)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Zero Dependencies](https://img.shields.io/badge/Dependencies-0-success.svg)](https://deno.land)
+<h1 align="center">BurnLink</h1>
 
-A rock-solid, zero-dependency, single-use URL shortener built for **Deno** and **Deno Deploy** powered by **Deno KV**.
+<p align="center">
+  <strong>A rock-solid, zero-dependency, single-use URL shortener built for Deno & Deno Deploy powered by Deno KV.</strong>
+</p>
 
-BurnLink allows you to share destination URLs via unique short links that are strictly configured to "burn" (expire) after a single human access.
+<p align="center">
+  <a href="https://deno.land"><img src="https://img.shields.io/badge/Deno-v2.x-black?logo=deno" alt="Deno" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://deno.land"><img src="https://img.shields.io/badge/Dependencies-0-success.svg" alt="Zero Dependencies" /></a>
+</p>
 
-It includes **built-in protection against automated link unfurlers** (such as Discord, Slack, iMessage, and email security crawlers) by requiring an explicit human click on an interstitial landing page before the redirect occurs. Concurrent clicks are resolved atomically to guarantee single-use.
+<p align="center">
+  <em>Share confidential destination URLs via ephemeral links configured to burn immediately upon first access. Built-in immunity against automated bot crawlers and social link unfurlers.</em>
+</p>
 
 ---
 
